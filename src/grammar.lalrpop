@@ -5,9 +5,18 @@ use crate::myast::{Node, Op};
 
 grammar;
 
-pub Code : Vec<Node> = {
-    <v:(<Def>  ";")+> => v
-}
+Separated<T> : Vec<T> = {
+    <v:(<T> ";")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
+};
+
+pub Code = Separated<Def>;
 
 pub Def : Node = {
     "def" <name:Id> <args:Arg*> "->" <rettype:Id> <body:Block> => {
@@ -17,12 +26,14 @@ pub Def : Node = {
         Node::VarDef(name, Box::new(e))
     },
     <e:IfExpr> => e
-}
+};
+
+pub ExprList = Separated<IfExpr>;
 
 pub Block : Vec<Node> = {
-    "{" <e:(<IfExpr> ";")+> "}" => e,
+    "{" <e:ExprList> "}" => e,
     <e:IfExpr> => vec![e]
-}
+};
 
 pub Arg : (String, String) = {
     <name:Id> ":" <typename:Id> => {

@@ -4,8 +4,12 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    // Tell cargo to tell rustc to link the system bzip2
-    // shared library.
+    lalrpop::process_root().unwrap();
+
+    println!("cargo:rustc-link-search=native=/usr/local/lib/");
+    println!("cargo:rustc-link-search=native=./");
+    println!("cargo:rustc-link-lib=static=jit");
+    println!("cargo:rustc-link-lib=static=cwrapper");
     println!("cargo:rustc-link-lib=jit");
 
     // Tell cargo to invalidate the built crate whenever the wrapper changes
@@ -31,10 +35,4 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
-    
-    lalrpop::process_root().unwrap();
-    println!("cargo:rustc-link-search=native=/usr/local/lib/");
-    println!("cargo:rustc-link-search=native=./");
-    println!("cargo:rustc-link-lib=static=jit");
-    println!("cargo:rustc-link-lib=static=cwrapper")
 }
