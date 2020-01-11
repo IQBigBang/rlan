@@ -34,7 +34,7 @@ fn main() {
     
     lalrpop::process_root().unwrap();
     println!("cargo:rustc-link-search=native=/usr/local/lib/");
-    println!("cargo:rustc-link-search=native=/media/iqbigbang/PevnyDisk/jitcompiler2");
+    println!("cargo:rustc-link-search=native=./");
     println!("cargo:rustc-link-lib=static=jit");
     println!("cargo:rustc-link-lib=static=cwrapper")
 }
