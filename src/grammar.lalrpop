@@ -1,0 +1,88 @@
+use std::str::FromStr;
+use std::string::String;
+
+use crate::myast::{Node, Op};
+
+grammar;
+
+pub Code : Vec<Node> = {
+    <v:(<Def>  ";")+> => v
+}
+
+pub Def : Node = {
+    "def" <name:Id> <args:Arg*> "->" <rettype:Id> <body:Block> => {
+        Node::FuncDef(name, args, rettype, body)
+    },
+    "let" <name:Id> "=" <e:IfExpr> => {
+        Node::VarDef(name, Box::new(e))
+    },
+    <e:IfExpr> => e
+}
+
+pub Block : Vec<Node> = {
+    "{" <e:(<IfExpr> ";")+> "}" => e,
+    <e:IfExpr> => vec![e]
+}
+
+pub Arg : (String, String) = {
+    <name:Id> ":" <typename:Id> => {
+        (name, typename)
+    }
+}
+
+pub IfExpr : Node = {
+    "if" <cond:RetExpr> ":" <e1:IfExpr> "else" <e2:IfExpr> => Node::If(Box::new(cond), Box::new(e1), Box::new(e2)),
+    <e:RetExpr> => e
+}
+
+pub RetExpr : Node = {
+    "<-" <e:Expr> => Node::Ret(Box::new(e)),
+    <e:Expr> => e
+}
+
+pub Expr : Node = {
+    <lhs:CmpExpr> "and" <rhs:Expr> => Node::BinOp(Box::new(lhs), Op::And, Box::new(rhs)),
+    <lhs:CmpExpr> "or" <rhs:Expr> => Node::BinOp(Box::new(lhs), Op::Or, Box::new(rhs)),
+    <e:CmpExpr> => e
+}
+
+pub CmpExpr : Node = {
+    <lhs:ValExpr> "==" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Eql, Box::new(rhs)),
+    <e:ValExpr> => e
+}
+
+pub ValExpr: Node = {
+    <lhs:Term> "+" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Add, Box::new(rhs)),
+    <lhs:Term> "-" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Sub, Box::new(rhs)),
+    <t:Term> => t
+};
+
+pub Term: Node = {
+    <lhs:FnAtom> "*" <rhs:Term> => Node::BinOp(Box::new(lhs), Op::Mul, Box::new(rhs)),
+    <lhs:FnAtom> "/" <rhs:Term> => Node::BinOp(Box::new(lhs), Op::Div, Box::new(rhs)),
+    <f:FnAtom> => f
+};
+
+pub FnAtom : Node = {
+    <ats:Atom+> => {
+        if ats.len() == 1 {
+            let mut ats = ats;
+            ats.pop().unwrap()
+        } else {
+            Node::Call(ats)
+        }
+    }
+}
+
+pub Atom: Node = {
+    <n:Num> => Node::Number(n),
+    <i:Id> => Node::Ident(i),
+    <s:Str> => Node::StrLiteral(s),
+    "(" <e:IfExpr> ")" => e
+}
+
+Num: i64 = <s:r"[0-9]+*"> => i64::from_str(s).unwrap();
+
+Id: String = <s:r"[a-zA-Z_][a-zA-Z0-9_-]*"> => String::from(s);
+
+Str: String = <s:r#""[^"\r\n]*""#> => String::from(&s[1..s.len()-1]);
