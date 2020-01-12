@@ -158,6 +158,45 @@ impl Function {
         }
     }
 
+    pub fn i_ne(&self, val1: &Value, val2: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_ne(self.ptr, val1.ptr, val2.ptr))
+        }
+    }
+
+    pub fn i_lt(&self, val1: &Value, val2: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_lt(self.ptr, val1.ptr, val2.ptr))
+        }
+    }
+
+    pub fn i_le(&self, val1: &Value, val2: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_le(self.ptr, val1.ptr, val2.ptr))
+        }
+    }
+
+    pub fn i_gt(&self, val1: &Value, val2: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_gt(self.ptr, val1.ptr, val2.ptr))
+        }
+    }
+
+    pub fn i_ge(&self, val1: &Value, val2: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_ge(self.ptr, val1.ptr, val2.ptr))
+        }
+    }
+
+    pub fn i_and(&self, val1: &Value, val2: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_and(self.ptr, val1.ptr, val2.ptr))
+        }
+    }
+
+    pub fn i_or(&self, val1: &Value, val2: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_or(self.ptr, val1.ptr, val2.ptr))
         }
     }
 

@@ -19,6 +19,11 @@ pub enum Op {
     Mul, // *
     Div, // /
     Eql, // ==
+    Neq, // !=
+    Lwt, // <
+    Lwe, // <=
+    Grt, // >
+    Gre, // >=
     And, // and
     Or,  // or
 }

@@ -59,6 +59,11 @@ pub Expr : Node = {
 
 pub CmpExpr : Node = {
     <lhs:ValExpr> "==" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Eql, Box::new(rhs)),
+    <lhs:ValExpr> "!=" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Neq, Box::new(rhs)),
+    <lhs:ValExpr> "<" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Lwt, Box::new(rhs)),
+    <lhs:ValExpr> "<=" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Lwe, Box::new(rhs)),
+    <lhs:ValExpr> ">" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Grt, Box::new(rhs)),
+    <lhs:ValExpr> ">=" <rhs:ValExpr> => Node::BinOp(Box::new(lhs), Op::Gre, Box::new(rhs)),
     <e:ValExpr> => e
 }
 

@@ -81,7 +81,11 @@ impl Builder {
                 Op::Sub => self.main.i_sub(&lhs, &rhs).with_type(TPINDEX_INT64),
                 Op::Mul => self.main.i_mul(&lhs, &rhs).with_type(TPINDEX_INT64),
                 Op::Eql => self.main.i_eq(&lhs, &rhs).with_type(TPINDEX_BOOL),
-        if lhs.get_type() == get_type("int") && rhs.get_type() == get_type("int") {
+                Op::Neq => self.main.i_ne(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                Op::Lwt => self.main.i_lt(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                Op::Lwe => self.main.i_le(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                Op::Grt => self.main.i_gt(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                Op::Gre => self.main.i_ge(&lhs, &rhs).with_type(TPINDEX_BOOL),
                 _ => panic!("Invalid binary operands")
             }
         } else if lhs.type_index() == TPINDEX_BOOL && rhs.type_index() == TPINDEX_BOOL {
