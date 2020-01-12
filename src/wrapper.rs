@@ -15,9 +15,12 @@ pub struct Function {
     argc: u32,
 }
 
+pub type TpIndex = i32;
+
 #[derive(Copy, Clone)]
 pub struct Value {
     ptr: *mut _jit_value,
+    tpindex: TpIndex, // type index (-1 for undefined types)
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -28,6 +31,10 @@ pub struct Type {
 pub struct Label {
     ptr: *mut jit_label_t,
 }
+
+pub const TPINDEX_VOID_OR_UNKNOWN : TpIndex = -1;
+pub const TPINDEX_INT64 : TpIndex = 0;
+pub const TPINDEX_BOOL : TpIndex = 1;
 
 impl Context {
     pub fn new() -> Self {
@@ -90,7 +97,7 @@ impl Function {
         unsafe {
             let mut params = Vec::new();
             for i in 0..self.argc {
-                params.push(Value {ptr: jit_value_get_param(self.ptr, i as u32)});
+                params.push(Value::new(jit_value_get_param(self.ptr, i as u32)));
             }
             params
         }
@@ -129,31 +136,34 @@ impl Function {
 
     pub fn i_add(&self, val1: &Value, val2: &Value) -> Value {
         unsafe {
-            Value {ptr: jit_insn_add(self.ptr, val1.ptr, val2.ptr)}
+            Value::new(jit_insn_add(self.ptr, val1.ptr, val2.ptr))
         }
     }
 
     pub fn i_sub(&self, val1: &Value, val2: &Value) -> Value {
         unsafe {
-            Value {ptr: jit_insn_sub(self.ptr, val1.ptr, val2.ptr)}
+            Value::new(jit_insn_sub(self.ptr, val1.ptr, val2.ptr))
         }
     }
 
     pub fn i_mul(&self, val1: &Value, val2: &Value) -> Value {
         unsafe {
-            Value {ptr: jit_insn_mul(self.ptr, val1.ptr, val2.ptr)}
+            Value::new(jit_insn_mul(self.ptr, val1.ptr, val2.ptr))
         }
     }
 
     pub fn i_eq(&self, val1: &Value, val2: &Value) -> Value {
         unsafe {
-            Value {ptr: jit_insn_eq(self.ptr, val1.ptr, val2.ptr)}
+            Value::new(jit_insn_eq(self.ptr, val1.ptr, val2.ptr))
+        }
+    }
+
         }
     }
 
     pub fn i_convert(&self, val: &Value, tp: Type) -> Value {
         unsafe {
-            Value {ptr: jit_insn_convert(self.ptr, val.ptr, tp.ptr, 0)}
+            Value::new(jit_insn_convert(self.ptr, val.ptr, tp.ptr, 0))
         }
     }
 
@@ -163,7 +173,7 @@ impl Function {
             for a in args {
                 argsval.push(a.ptr);
             }
-            Value {ptr: jit_insn_call(self.ptr, ptr::null(), f.ptr, ptr::null_mut(), argsval.as_mut_ptr(), args.len().try_into().unwrap(), 0)}
+            Value::new(jit_insn_call(self.ptr, ptr::null(), f.ptr, ptr::null_mut(), argsval.as_mut_ptr(), args.len().try_into().unwrap(), 0))
         }
     }
 
@@ -187,24 +197,35 @@ impl Function {
 }
 
 impl Value {
+
+    fn new(ptr: *mut _jit_value) -> Self {
+        Value {ptr, tpindex: TPINDEX_VOID_OR_UNKNOWN}
+    }
+
     pub fn constant(func: &Function, tp: Type, val: i64) -> Self {
         unsafe {
-            Value {ptr: jit_value_create_nint_constant(func.ptr, tp.ptr, val)}
+            Value::new(jit_value_create_nint_constant(func.ptr, tp.ptr, val))
         }
     }
 
     pub fn constant_long(func: &Function, val: i64) -> Self {
-        Value::constant(func, Type::long(), val)
+        Value::constant(func, Type::long(), val).with_type(TPINDEX_INT64)
     }
 
     pub fn constant_void(func: &Function) -> Self {
-        Value::constant(func, Type::void(), 0)
+        Value::constant(func, Type::void(), 0).with_type(TPINDEX_VOID_OR_UNKNOWN)
     }
 
-    pub fn get_type(&self) -> Type {
-        unsafe {
-            Type {ptr: jit_value_get_type(self.ptr)}
-        }
+    pub fn set_type(&mut self, tp: TpIndex) {
+        self.tpindex = tp;   
+    }
+
+    pub fn with_type(&self, tp: TpIndex) -> Self {
+        Value {ptr: self.ptr, tpindex: tp}
+    }
+
+    pub fn type_index(&self) -> TpIndex {
+        self.tpindex
     }
 }
 

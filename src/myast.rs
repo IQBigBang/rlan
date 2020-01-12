@@ -14,11 +14,11 @@ pub enum Node {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Op {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Eql,
-    And,
-    Or,
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
+    Eql, // ==
+    And, // and
+    Or,  // or
 }

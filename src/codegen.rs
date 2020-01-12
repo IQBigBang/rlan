@@ -1,35 +1,42 @@
 use crate::myast::{Node, Op};
-use crate::wrapper::{Context, Function, Value, Label, Type};
+use crate::wrapper::{Context, Function, Value, Label, Type, TpIndex, TPINDEX_BOOL, TPINDEX_INT64};
 use std::mem;
 
 use std::collections::HashMap;
+
+pub struct TypeDescriptor {
+    pub index: TpIndex,
+    pub name: String,
+    pub tp: Type
+}
 
 pub struct Builder {
     pub context: Context,
     pub main: Function,
     pub vtable: HashMap<String, Value>,
-    pub ftable: HashMap<String, Function>,
-}
-
-fn get_type(name: &str) -> Type {
-    if name == "int" {
-        Type::long()
-    } else if name == "bool" {
-        Type::sbyte()
-    } else {
-        panic!("Unknown type")
-    }
-}
-
-fn get_type_string(name: &String) -> Type {
-    get_type(name.as_ref())
+    pub ftable: HashMap<String, (Function, Vec<TpIndex>, TpIndex)>, // function, arg types, ret type
+    pub types: Vec<TypeDescriptor>
 }
 
 impl Builder {
     pub fn new() -> Self {
         let context = Context::new();
         let main = context.new_function(&mut [Type::void(); 0], Type::int());
-        Builder {context, main, vtable: HashMap::new(), ftable: HashMap::new()}
+        let types = vec![
+            TypeDescriptor {index: TPINDEX_INT64, name: String::from("int"), tp: Type::long()}, // int = 0
+            TypeDescriptor {index: TPINDEX_BOOL, name: String::from("bool"), tp: Type::long()}, // bool = 1
+        ];
+        Builder {context, main, vtable: HashMap::new(), ftable: HashMap::new(), types}
+    }
+
+    fn get_type_descriptor(&self, s: &String) -> &TypeDescriptor {
+        let mut res = None;
+        for td in &self.types {
+            if &td.name == s {
+                res = Some(td)
+            }
+        };
+        &res.expect("Invalid type")
     }
 
     pub fn execute(&mut self) -> i32 {
@@ -62,46 +69,54 @@ impl Builder {
     fn visit_ret(&mut self, val: &Box<Node>) -> Value {
         let cval = self.visit(&*val);
         self.main.i_return(&cval);
-        Value::constant_long(&self.main, 0)
+        Value::constant_long(&self.main, 0) // type assured within the call
     }
 
     fn visit_binop(&mut self, lhs: &Node, op: &Op, rhs: &Node) -> Value {
         let lhs = self.visit(lhs);
         let rhs = self.visit(rhs);
-        if lhs.get_type() == get_type("int") && rhs.get_type() == get_type("int") {
+        if lhs.type_index() == TPINDEX_INT64 && rhs.type_index() == TPINDEX_INT64 {
             match op {
-                Op::Add => self.main.i_add(&lhs, &rhs),
-                Op::Sub => self.main.i_sub(&lhs, &rhs),
-                Op::Mul => self.main.i_mul(&lhs, &rhs),
-                Op::Eql => self.main.i_convert(&self.main.i_eq(&lhs, &rhs), get_type("bool")),
-                _ => unimplemented!()
+                Op::Add => self.main.i_add(&lhs, &rhs).with_type(TPINDEX_INT64),
+                Op::Sub => self.main.i_sub(&lhs, &rhs).with_type(TPINDEX_INT64),
+                Op::Mul => self.main.i_mul(&lhs, &rhs).with_type(TPINDEX_INT64),
+                Op::Eql => self.main.i_eq(&lhs, &rhs).with_type(TPINDEX_BOOL),
+        if lhs.get_type() == get_type("int") && rhs.get_type() == get_type("int") {
+                _ => panic!("Invalid binary operands")
             }
-        } else if lhs.get_type() == get_type("bool") && rhs.get_type() == get_type("bool") {
-            panic!("Invalid binary operands") // bool type
+        } else if lhs.type_index() == TPINDEX_BOOL && rhs.type_index() == TPINDEX_BOOL {
+            match op {
+                Op::And => self.main.i_and(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                Op::Or => self.main.i_or(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                _ => panic!("Invalid binary operands")
+            }
         } else {
-            panic!("Invalid binary operands")
+            panic!(format!("Invalid binary operands {} and {}", lhs.type_index(), rhs.type_index()))
         }
     }
 
     fn visit_funcdef(&mut self, name: &String, args: &Vec<(String, String)>, rettype: &String, body: &Vec<Node>) -> Value {
         // get argument types
         let mut argtypes : Vec<Type> = Vec::new();
+        let mut argtypesindexes : Vec<i32> = Vec::new();
         for (_, argtype) in args {
-            argtypes.push(get_type_string(argtype));
+            let typedesc = self.get_type_descriptor(&argtype);
+            argtypesindexes.push(typedesc.index);
+            argtypes.push(typedesc.tp);
         }
         // create the function
-        let func = self.context.new_function(argtypes.as_mut(), get_type_string(rettype));
-        // and save it in case of recursion
-        self.ftable.insert(name.clone(), func);
+        let func = self.context.new_function(argtypes.as_mut(), self.get_type_descriptor(rettype).tp);
         // place it instead of main
         let pre_main = mem::replace(&mut self.main, func);
-        // and clear symtable
+        // clear the symtable
         self.vtable.clear();
         // load parameters
         let params = self.main.get_params();
         for i in 0..params.len() {
-            self.vtable.insert(args[i].0.clone(), params[i]);
+            self.vtable.insert(args[i].0.clone(), params[i].with_type(argtypesindexes[i]));
         }
+        // and save it in case of recursion
+        self.ftable.insert(name.clone(), (self.main, argtypesindexes, self.get_type_descriptor(rettype).index));
         // compile body
         for n in body {
             self.visit(n);
@@ -123,17 +138,22 @@ impl Builder {
         for i in 1..name_and_args.len() {
             args.push(self.visit(name_and_args.get(i).unwrap()));
         };
-
+            
         let func = match self.ftable.get(fname) {
             None => panic!("Function doesn't exist"),
             Some(f) => f
-        };      
-        self.main.i_normal_call(func, args.as_ref())
+        }; 
+        for i in 0..args.len() {
+            if args[i].type_index() != func.1[i] {
+                panic!("Invalid argument type");
+            }
+        }
+        self.main.i_normal_call(&func.0, args.as_ref()).with_type(func.2)
     }
 
     fn visit_if(&mut self, cond: &Box<Node>, then: &Box<Node>, other: &Box<Node>) -> Value {
         let ccond = self.visit(cond);
-        if ccond.get_type() != get_type("bool") {
+        if ccond.type_index() != TPINDEX_BOOL {
             panic!("Condition type must be a bool");
         } else {
             let elsetree = Label::new();
