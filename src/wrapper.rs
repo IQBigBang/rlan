@@ -32,9 +32,9 @@ pub struct Label {
     ptr: *mut jit_label_t,
 }
 
-pub const TPINDEX_VOID_OR_UNKNOWN : TpIndex = -1;
-pub const TPINDEX_INT64 : TpIndex = 0;
-pub const TPINDEX_BOOL : TpIndex = 1;
+pub const TPINDEX_VOID_OR_UNKNOWN : TpIndex = 0;
+pub const TPINDEX_INT64 : TpIndex = 1;
+pub const TPINDEX_BOOL : TpIndex = 2;
 
 impl Context {
     pub fn new() -> Self {
@@ -213,6 +213,25 @@ impl Function {
                 argsval.push(a.ptr);
             }
             Value::new(jit_insn_call(self.ptr, ptr::null(), f.ptr, ptr::null_mut(), argsval.as_mut_ptr(), args.len().try_into().unwrap(), 0))
+        }
+    }
+
+    // return type is needed as it cannot be inferred
+    pub fn i_native_call(&self, f: *mut c_void, args: &[Value], ret_type: Type) -> Value {
+        unsafe {
+            let mut argsval : Vec<*mut _jit_value> = Vec::with_capacity(args.len());
+            let mut types : Vec<jit_type_t> = Vec::with_capacity(args.len());
+            for a in args {
+                argsval.push(a.ptr);
+                types.push(jit_value_get_type(a.ptr));
+            }
+            // construct signature from values (assume correct values passed in)
+            let signature = jit_type_create_signature(
+                jit_abi_t_jit_abi_cdecl,
+                ret_type.ptr, 
+                types.as_mut_ptr(), 
+                args.len() as u32, 1);
+            Value::new(jit_insn_call_native(self.ptr, ptr::null(), f, signature, argsval.as_mut_ptr(), args.len().try_into().unwrap(), 0))
         }
     }
 

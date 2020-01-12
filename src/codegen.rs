@@ -1,6 +1,8 @@
 use crate::myast::{Node, Op};
-use crate::wrapper::{Context, Function, Value, Label, Type, TpIndex, TPINDEX_BOOL, TPINDEX_INT64};
+use crate::wrapper::{Context, Function, Value, Label, Type, TpIndex, TPINDEX_BOOL, TPINDEX_INT64, TPINDEX_VOID_OR_UNKNOWN};
 use std::mem;
+use crate::stdlib::*;
+use either::Either;
 
 use std::collections::HashMap;
 
@@ -14,7 +16,7 @@ pub struct Builder {
     pub context: Context,
     pub main: Function,
     pub vtable: HashMap<String, Value>,
-    pub ftable: HashMap<String, (Function, Vec<TpIndex>, TpIndex)>, // function, arg types, ret type
+    pub ftable: HashMap<String, (Either<NativeFunc, Function>, Vec<TpIndex>, TpIndex)>, // function, arg types, ret type
     pub types: Vec<TypeDescriptor>
 }
 
@@ -22,11 +24,20 @@ impl Builder {
     pub fn new() -> Self {
         let context = Context::new();
         let main = context.new_function(&mut [Type::void(); 0], Type::int());
+        // initialize built-in types
         let types = vec![
-            TypeDescriptor {index: TPINDEX_INT64, name: String::from("int"), tp: Type::long()}, // int = 0
-            TypeDescriptor {index: TPINDEX_BOOL, name: String::from("bool"), tp: Type::long()}, // bool = 1
+            TypeDescriptor {index: TPINDEX_VOID_OR_UNKNOWN, name: String::new(), tp: Type::void()}, // void = 0
+            TypeDescriptor {index: TPINDEX_INT64, name: String::from("int"), tp: Type::long()}, // int = 1
+            TypeDescriptor {index: TPINDEX_BOOL, name: String::from("bool"), tp: Type::long()}, // bool = 2
         ];
-        Builder {context, main, vtable: HashMap::new(), ftable: HashMap::new(), types}
+        // initialize built-in functions
+        let mut ftable : HashMap<String, (Either<NativeFunc, Function>, Vec<TpIndex>, TpIndex)> = HashMap::new();
+        ftable.insert(String::from("printint"), (
+            Either::Left(stdlib_printint as NativeFunc),
+            vec![TPINDEX_INT64],
+            TPINDEX_VOID_OR_UNKNOWN
+        ));
+        Builder {context, main, vtable: HashMap::new(), ftable, types}
     }
 
     fn get_type_descriptor(&self, s: &String) -> &TypeDescriptor {
@@ -120,7 +131,11 @@ impl Builder {
             self.vtable.insert(args[i].0.clone(), params[i].with_type(argtypesindexes[i]));
         }
         // and save it in case of recursion
-        self.ftable.insert(name.clone(), (self.main, argtypesindexes, self.get_type_descriptor(rettype).index));
+        self.ftable.insert(name.clone(), (
+            Either::Right(self.main), // right = custom function 
+            argtypesindexes, 
+            self.get_type_descriptor(rettype).index
+        ));
         // compile body
         for n in body {
             self.visit(n);
@@ -152,7 +167,13 @@ impl Builder {
                 panic!("Invalid argument type");
             }
         }
-        self.main.i_normal_call(&func.0, args.as_ref()).with_type(func.2)
+        match &func.0 {
+            Either::Left(nativefunc) => {
+                let raw_type : Type = self.types[func.2 as usize].tp;
+                self.main.i_native_call(*nativefunc, args.as_ref(), raw_type).with_type(func.2)
+            },
+            Either::Right(codefunc) => self.main.i_normal_call(codefunc, args.as_ref()).with_type(func.2)
+        }
     }
 
     fn visit_if(&mut self, cond: &Box<Node>, then: &Box<Node>, other: &Box<Node>) -> Value {

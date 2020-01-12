@@ -6,4 +6,4 @@ def gcd x:int y:int -> int {
     else   
         <- gcd (x - y) y
 };
-gcd 30 25
+printint (gcd 30 25)
