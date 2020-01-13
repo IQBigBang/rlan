@@ -140,7 +140,7 @@ impl Builder {
         for n in body {
             self.visit(n);
         }
-        self.main.optimize();
+        #[cfg(Debug)]
         self.main.dump();
         self.main.compile();
         // place main again

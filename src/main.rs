@@ -16,9 +16,13 @@ use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        panic!("Error: the program requires one argument -  the file name");
+    }
     let code: String = std::fs::read_to_string(&args[1]).unwrap();
     let parser = grammar::CodeParser::new();
     let parsed = parser.parse(&code).unwrap();
+    #[cfg(Debug)]
     println!("{:#?}", parsed);
 
     let mut builder = Builder::new();
@@ -29,6 +33,6 @@ fn main() {
     builder.main.i_return(&val);
 
     let res = builder.execute();
-
+    #[cfg(Debug)]
     println!("result = {}", res);
 }
