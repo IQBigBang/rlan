@@ -6,4 +6,8 @@ def gcd x:int y:int -> int {
     else   
         <- gcd (x - y) y
 };
+def localvar x:int -> int {
+    let val = x + x;
+    <- val + val
+};
 printint (gcd 30 25)

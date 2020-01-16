@@ -22,7 +22,7 @@ fn main() {
     let code: String = std::fs::read_to_string(&args[1]).unwrap();
     let parser = grammar::CodeParser::new();
     let parsed = parser.parse(&code).unwrap();
-    #[cfg(Debug)]
+    #[cfg(debug_assertions)]
     println!("{:#?}", parsed);
 
     let mut builder = Builder::new();
@@ -31,8 +31,7 @@ fn main() {
         val = builder.visit(&n);
     };
     builder.main.i_return(&val);
-
     let res = builder.execute();
-    #[cfg(Debug)]
+    #[cfg(debug_assertions)]
     println!("result = {}", res);
 }

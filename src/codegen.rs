@@ -1,53 +1,51 @@
 use crate::myast::{Node, Op};
-use crate::wrapper::{Context, Function, Value, Label, Type, TpIndex, TPINDEX_BOOL, TPINDEX_INT64, TPINDEX_VOID_OR_UNKNOWN};
+use crate::wrapper::{Context, Function, Value, Label, Type};
 use std::mem;
 use crate::stdlib::*;
 use either::Either;
+use libc::c_void;
 
 use std::collections::HashMap;
 
-pub struct TypeDescriptor {
-    pub index: TpIndex,
-    pub name: String,
-    pub tp: Type
+pub struct NativeFunc {
+    ptr: *mut c_void,
+    argtypes: Vec<Type>,
+    ret: Type
 }
 
 pub struct Builder {
     pub context: Context,
     pub main: Function,
     pub vtable: HashMap<String, Value>,
-    pub ftable: HashMap<String, (Either<NativeFunc, Function>, Vec<TpIndex>, TpIndex)>, // function, arg types, ret type
-    pub types: Vec<TypeDescriptor>
+    pub ftable: HashMap<String, Either<NativeFunc, Function>>,
 }
 
 impl Builder {
     pub fn new() -> Self {
         let context = Context::new();
         let main = context.new_function(&mut [Type::void(); 0], Type::int());
-        // initialize built-in types
-        let types = vec![
-            TypeDescriptor {index: TPINDEX_VOID_OR_UNKNOWN, name: String::new(), tp: Type::void()}, // void = 0
-            TypeDescriptor {index: TPINDEX_INT64, name: String::from("int"), tp: Type::long()}, // int = 1
-            TypeDescriptor {index: TPINDEX_BOOL, name: String::from("bool"), tp: Type::long()}, // bool = 2
-        ];
         // initialize built-in functions
-        let mut ftable : HashMap<String, (Either<NativeFunc, Function>, Vec<TpIndex>, TpIndex)> = HashMap::new();
-        ftable.insert(String::from("printint"), (
-            Either::Left(stdlib_printint as NativeFunc),
-            vec![TPINDEX_INT64],
-            TPINDEX_VOID_OR_UNKNOWN
-        ));
-        Builder {context, main, vtable: HashMap::new(), ftable, types}
+        let mut ftable : HashMap<String, Either<NativeFunc, Function>> = HashMap::new();
+        ftable.insert(String::from("printint"), 
+            Either::Left(NativeFunc {
+                ptr: stdlib_printint as *mut c_void,
+                argtypes: vec![Type::int()],
+                ret: Type::void()
+            })
+        );
+        Builder {context, main, vtable: HashMap::new(), ftable}
     }
 
-    fn get_type_descriptor(&self, s: &String) -> &TypeDescriptor {
-        let mut res = None;
-        for td in &self.types {
-            if &td.name == s {
-                res = Some(td)
-            }
-        };
-        &res.expect("Invalid type")
+    fn get_type(&self, s: &String) -> Type {
+        if s == "int" {
+            Type::int()
+        } else if s == "bool" {
+            Type::bool()
+        } else if s == "void" {
+            Type::void()
+        } else {
+            panic!("Invalid type")
+        }
     }
 
     pub fn execute(&mut self) -> i32 {
@@ -61,6 +59,7 @@ impl Builder {
             Node::Number(i) => self.visit_number(i),
             Node::BinOp(lhs, op, rhs) => self.visit_binop(lhs, op, rhs),
             Node::FuncDef(name, args, rettype, body) => self.visit_funcdef(name, args, rettype, body),
+            Node::VarDef(name, val) => self.visit_vardef(name, val),
             Node::Ident(name) => self.visit_ident(name),
             Node::Call(name_and_args) => self.visit_call(name_and_args),
             Node::If(cond, then, other) => self.visit_if(cond, then, other),
@@ -74,7 +73,8 @@ impl Builder {
     }
 
     fn visit_ident(&mut self, name: &String) -> Value {
-        *self.vtable.get(name).expect("Variable doesn't exist.")
+        let ptr = self.vtable.get(name).expect("Variable doesn't exist.");
+        self.main.i_load(ptr)
     }
 
     fn visit_ret(&mut self, val: &Box<Node>) -> Value {
@@ -86,41 +86,41 @@ impl Builder {
     fn visit_binop(&mut self, lhs: &Node, op: &Op, rhs: &Node) -> Value {
         let lhs = self.visit(lhs);
         let rhs = self.visit(rhs);
-        if lhs.type_index() == TPINDEX_INT64 && rhs.type_index() == TPINDEX_INT64 {
+        if lhs.get_type().is_int() && rhs.get_type().is_int() {
             match op {
-                Op::Add => self.main.i_add(&lhs, &rhs).with_type(TPINDEX_INT64),
-                Op::Sub => self.main.i_sub(&lhs, &rhs).with_type(TPINDEX_INT64),
-                Op::Mul => self.main.i_mul(&lhs, &rhs).with_type(TPINDEX_INT64),
-                Op::Eql => self.main.i_eq(&lhs, &rhs).with_type(TPINDEX_BOOL),
-                Op::Neq => self.main.i_ne(&lhs, &rhs).with_type(TPINDEX_BOOL),
-                Op::Lwt => self.main.i_lt(&lhs, &rhs).with_type(TPINDEX_BOOL),
-                Op::Lwe => self.main.i_le(&lhs, &rhs).with_type(TPINDEX_BOOL),
-                Op::Grt => self.main.i_gt(&lhs, &rhs).with_type(TPINDEX_BOOL),
-                Op::Gre => self.main.i_ge(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                Op::Add => self.main.i_add(&lhs, &rhs),
+                Op::Sub => self.main.i_sub(&lhs, &rhs),
+                Op::Mul => self.main.i_mul(&lhs, &rhs),
+                Op::Eql => self.main.i_convert(&self.main.i_eq(&lhs, &rhs), Type::bool()),
+                Op::Neq => self.main.i_convert(&self.main.i_ne(&lhs, &rhs), Type::bool()),
+                Op::Lwt => self.main.i_convert(&self.main.i_lt(&lhs, &rhs), Type::bool()),
+                Op::Lwe => self.main.i_convert(&self.main.i_le(&lhs, &rhs), Type::bool()),
+                Op::Grt => self.main.i_convert(&self.main.i_gt(&lhs, &rhs), Type::bool()),
+                Op::Gre => self.main.i_convert(&self.main.i_ge(&lhs, &rhs), Type::bool()),
                 _ => panic!("Invalid binary operands")
             }
-        } else if lhs.type_index() == TPINDEX_BOOL && rhs.type_index() == TPINDEX_BOOL {
+        } else if lhs.get_type().is_bool() && rhs.get_type().is_bool() {
             match op {
-                Op::And => self.main.i_and(&lhs, &rhs).with_type(TPINDEX_BOOL),
-                Op::Or => self.main.i_or(&lhs, &rhs).with_type(TPINDEX_BOOL),
+                Op::And => self.main.i_and(&lhs, &rhs),
+                Op::Or => self.main.i_or(&lhs, &rhs),
                 _ => panic!("Invalid binary operands")
             }
         } else {
-            panic!(format!("Invalid binary operands {} and {}", lhs.type_index(), rhs.type_index()))
+            print!("Invalid binary operands for operator {:?}", op);
+            lhs.get_type().dump(); rhs.get_type().dump();
+            println!("");
+            panic!("Err")
         }
     }
 
     fn visit_funcdef(&mut self, name: &String, args: &Vec<(String, String)>, rettype: &String, body: &Vec<Node>) -> Value {
         // get argument types
         let mut argtypes : Vec<Type> = Vec::new();
-        let mut argtypesindexes : Vec<i32> = Vec::new();
         for (_, argtype) in args {
-            let typedesc = self.get_type_descriptor(&argtype);
-            argtypesindexes.push(typedesc.index);
-            argtypes.push(typedesc.tp);
+            argtypes.push(self.get_type(&argtype));
         }
         // create the function
-        let func = self.context.new_function(argtypes.as_mut(), self.get_type_descriptor(rettype).tp);
+        let func = self.context.new_function(argtypes.as_mut(), self.get_type(rettype));
         // place it instead of main
         let pre_main = mem::replace(&mut self.main, func);
         // clear the symtable
@@ -128,21 +128,21 @@ impl Builder {
         // load parameters
         let params = self.main.get_params();
         for i in 0..params.len() {
-            self.vtable.insert(args[i].0.clone(), params[i].with_type(argtypesindexes[i]));
+            let param = params[i];
+            self.vtable.insert(args[i].0.clone(), param);
         }
         // and save it in case of recursion
-        self.ftable.insert(name.clone(), (
-            Either::Right(self.main), // right = custom function 
-            argtypesindexes, 
-            self.get_type_descriptor(rettype).index
-        ));
+        self.ftable.insert(name.clone(),
+            Either::Right(self.main), // right = custom function
+        );
         // compile body
         for n in body {
             self.visit(n);
         }
-        #[cfg(Debug)]
+        #[cfg(debug_assertions)]
         self.main.dump();
         self.main.compile();
+        self.main.dump();
         // place main again
         mem::replace(&mut self.main, pre_main);
         Value::constant_void(&self.main)
@@ -157,28 +157,32 @@ impl Builder {
         for i in 1..name_and_args.len() {
             args.push(self.visit(name_and_args.get(i).unwrap()));
         };
-            
         let func = match self.ftable.get(fname) {
             None => panic!("Function doesn't exist"),
             Some(f) => f
-        }; 
-        for i in 0..args.len() {
-            if args[i].type_index() != func.1[i] {
-                panic!("Invalid argument type");
-            }
-        }
-        match &func.0 {
+        };
+        match &func {
             Either::Left(nativefunc) => {
-                let raw_type : Type = self.types[func.2 as usize].tp;
-                self.main.i_native_call(*nativefunc, args.as_ref(), raw_type).with_type(func.2)
+                self.main.i_native_call(nativefunc.ptr, args.as_ref(), nativefunc.ret)
             },
-            Either::Right(codefunc) => self.main.i_normal_call(codefunc, args.as_ref()).with_type(func.2)
+            Either::Right(codefunc) => self.main.i_normal_call(codefunc, args.as_ref())
         }
+    }
+
+    fn visit_vardef(&mut self, name: &String, val: &Box<Node>) -> Value {
+        let val = self.visit(&*val);
+        self.vtable.insert(name.to_string(), val);
+        Value::constant_void(&self.main) // TODO
     }
 
     fn visit_if(&mut self, cond: &Box<Node>, then: &Box<Node>, other: &Box<Node>) -> Value {
         let ccond = self.visit(cond);
-        if ccond.type_index() != TPINDEX_BOOL {
+        Type::bool().is_bool();
+        Value::create(&self.main, &Type::bool()).get_type().is_bool();
+        self.main.i_convert(&Value::constant_long(&self.main, 0), Type::bool()).get_type().is_bool();
+        //println!("{}", Type::bool().is_bool());
+        if !ccond.get_type().is_bool() {
+            ccond.get_type().dump();
             panic!("Condition type must be a bool");
         } else {
             let elsetree = Label::new();

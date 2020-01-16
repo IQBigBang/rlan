@@ -22,9 +22,6 @@ pub Def : Node = {
     "def" <name:Id> <args:Arg*> "->" <rettype:Id> <body:Block> => {
         Node::FuncDef(name, args, rettype, body)
     },
-    "let" <name:Id> "=" <e:IfExpr> => {
-        Node::VarDef(name, Box::new(e))
-    },
     <e:IfExpr> => e
 };
 
@@ -42,7 +39,12 @@ pub Arg : (String, String) = {
 }
 
 pub IfExpr : Node = {
-    "if" <cond:RetExpr> ":" <e1:IfExpr> "else" <e2:IfExpr> => Node::If(Box::new(cond), Box::new(e1), Box::new(e2)),
+    "if" <cond:RetExpr> ":" <e1:IfExpr> "else" <e2:IfExpr> => {
+        Node::If(Box::new(cond), Box::new(e1), Box::new(e2))
+    },
+        "let" <name:Id> "=" <e:IfExpr> => {
+        Node::VarDef(name, Box::new(e))
+    },
     <e:RetExpr> => e
 }
 

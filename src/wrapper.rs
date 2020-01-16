@@ -15,26 +15,21 @@ pub struct Function {
     argc: u32,
 }
 
-pub type TpIndex = i32;
-
 #[derive(Copy, Clone)]
 pub struct Value {
     ptr: *mut _jit_value,
-    tpindex: TpIndex, // type index (-1 for undefined types)
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone)]
 pub struct Type {
     ptr: *mut _jit_type,
 }
 
+pub type Signature = Type;
+
 pub struct Label {
     ptr: *mut jit_label_t,
 }
-
-pub const TPINDEX_VOID_OR_UNKNOWN : TpIndex = 0;
-pub const TPINDEX_INT64 : TpIndex = 1;
-pub const TPINDEX_BOOL : TpIndex = 2;
 
 impl Context {
     pub fn new() -> Self {
@@ -45,19 +40,10 @@ impl Context {
         }
     }
 
-    pub fn new_function(&self, params: &mut [Type], ret_type: Type) -> Function {
+    pub fn new_function(&self, params: &[Type], ret_type: Type) -> Function {
         unsafe {
-            let size = params.len() as u32;
-            let mut types : Vec<jit_type_t> = Vec::with_capacity(params.len());
-            for p in params {
-                types.push(p.ptr);
-            };
-            let signature = jit_type_create_signature(
-                jit_abi_t_jit_abi_cdecl,
-                ret_type.ptr, 
-                types.as_mut_ptr(), 
-                size, 1);
-            Function {ptr: jit_function_create(self.ptr, signature), argc: size}
+            let signature = Signature::create_signature(params, ret_type);
+            Function {ptr: jit_function_create(self.ptr, signature.ptr), argc: params.len() as u32}
         }
     }
 
@@ -118,7 +104,7 @@ impl Function {
 
     pub fn compile(&self) -> i32 {
         unsafe {
-            jit_function_set_optimization_level(self.ptr, 1);
+            jit_function_set_optimization_level(self.ptr, jit_function_get_max_optimization_level());
             jit_function_compile(self.ptr)
         }
     }
@@ -219,19 +205,15 @@ impl Function {
     // return type is needed as it cannot be inferred
     pub fn i_native_call(&self, f: *mut c_void, args: &[Value], ret_type: Type) -> Value {
         unsafe {
-            let mut argsval : Vec<*mut _jit_value> = Vec::with_capacity(args.len());
-            let mut types : Vec<jit_type_t> = Vec::with_capacity(args.len());
+            let mut argsval: Vec<*mut _jit_value> = Vec::with_capacity(args.len());
+            let mut types : Vec<Type> = Vec::with_capacity(args.len());
             for a in args {
+                types.push(a.get_type());
                 argsval.push(a.ptr);
-                types.push(jit_value_get_type(a.ptr));
             }
-            // construct signature from values (assume correct values passed in)
-            let signature = jit_type_create_signature(
-                jit_abi_t_jit_abi_cdecl,
-                ret_type.ptr, 
-                types.as_mut_ptr(), 
-                args.len() as u32, 1);
-            Value::new(jit_insn_call_native(self.ptr, ptr::null(), f, signature, argsval.as_mut_ptr(), args.len().try_into().unwrap(), 0))
+            // constructor signature from values (assume correct types passed in)
+            let signature = Signature::create_signature(types.as_slice(), ret_type);
+            Value::new(jit_insn_call_native(self.ptr, ptr::null(), f, signature.ptr, argsval.as_mut_ptr(), args.len().try_into().unwrap(), 0))
         }
     }
 
@@ -252,12 +234,36 @@ impl Function {
             jit_insn_return(self.ptr, val.ptr);
         }
     }
+
+    pub fn i_alloca(&self, size: i64) -> Value {
+        unsafe {
+            Value::new(jit_insn_alloca(self.ptr, Value::constant_long(&self, size).ptr))
+        }
+    }
+
+    pub fn i_store(&self, val: &Value, dest: &Value) {
+        unsafe {
+            jit_insn_store(self.ptr, dest.ptr, val.ptr);
+        }
+    }
+
+    pub fn i_load(&self, dest: &Value) -> Value {
+        unsafe {
+            Value::new(jit_insn_load(self.ptr, dest.ptr))
+        }
+    }
 }
 
 impl Value {
 
     fn new(ptr: *mut _jit_value) -> Self {
-        Value {ptr, tpindex: TPINDEX_VOID_OR_UNKNOWN}
+        Value {ptr}
+    }
+
+    pub fn create(func: &Function, tp: &Type) -> Self {
+        unsafe {
+            Value::new(jit_value_create(func.ptr, tp.ptr))
+        }
     }
 
     pub fn constant(func: &Function, tp: Type, val: i64) -> Self {
@@ -267,24 +273,25 @@ impl Value {
     }
 
     pub fn constant_long(func: &Function, val: i64) -> Self {
-        Value::constant(func, Type::long(), val).with_type(TPINDEX_INT64)
+        Value::constant(func, Type::int(), val)
     }
 
     pub fn constant_void(func: &Function) -> Self {
-        Value::constant(func, Type::void(), 0).with_type(TPINDEX_VOID_OR_UNKNOWN)
+        Value::constant(func, Type::void(), 0)
     }
 
-    pub fn set_type(&mut self, tp: TpIndex) {
-        self.tpindex = tp;   
+    pub fn get_type(&self) -> Type {
+        unsafe {
+            Type {ptr: jit_value_get_type(self.ptr)}
+        }
     }
 
-    pub fn with_type(&self, tp: TpIndex) -> Self {
-        Value {ptr: self.ptr, tpindex: tp}
+    pub fn dump(&self, f: &Function) {
+        unsafe {
+            printval(f.ptr, self.ptr);
+        }
     }
 
-    pub fn type_index(&self) -> TpIndex {
-        self.tpindex
-    }
 }
 
 impl Label {
@@ -303,27 +310,76 @@ impl Label {
 }
 
 impl Type {
+
+    pub fn create_signature(params: &[Type], ret: Type) -> Signature {
+        unsafe {
+            let size = params.len() as u32;
+            let mut types : Vec<jit_type_t> = Vec::with_capacity(params.len());
+            for p in params {
+                types.push(p.ptr)
+            };
+            Signature {ptr: jit_type_create_signature(
+                jit_abi_t_jit_abi_cdecl,
+                ret.ptr, 
+                types.as_mut_ptr(), 
+                size, 0
+            )}
+        }
+    }
+
+    pub fn pointer(pointed_type: &Type) -> Self {
+        unsafe {
+            Type{ptr: jit_type_create_pointer(pointed_type.ptr, 0)}
+        }
+    }
+
+    pub fn int() -> Self {
+        unsafe {
+            Type {ptr: jit_type_nint}
+        }
+    }
+
+    pub fn bool() -> Self {
+        unsafe {
+            Type {ptr: jit_type_sbyte}
+        }
+    }
+
     pub fn void() -> Self {
         unsafe {
             Type {ptr: jit_type_void}
         }
     }
 
-    pub fn sbyte() -> Self {
+    pub fn is_void(&self) -> bool {
         unsafe {
-            Type {ptr: jit_type_sbyte}
+            jit_type_get_kind(self.ptr) == (JIT_TYPE_VOID as i32)
         }
     }
 
-    pub fn int() -> Self {
+    pub fn is_int(&self) -> bool {
         unsafe {
-            Type {ptr: jit_type_int}
+            jit_type_get_kind(self.ptr) == (JIT_TYPE_NINT as i32) ||
+            jit_type_get_kind(self.ptr) == (JIT_TYPE_LONG as i32) ||
+            jit_type_get_kind(self.ptr) == (JIT_TYPE_INT as i32)
         }
     }
 
-    pub fn long() -> Self {
+    pub fn is_bool(&self) -> bool {
         unsafe {
-            Type {ptr: jit_type_long}
+            jit_type_get_kind(self.ptr) == (JIT_TYPE_SBYTE as i32)
+        }
+    }
+
+    pub fn get_pointed_type(&self) -> Type {
+        unsafe {
+            Type {ptr: jit_type_get_ref(self.ptr)}
+        }
+    }
+
+    pub fn dump(&self) {
+        unsafe {
+            printtype(self.ptr)
         }
     }
 }
